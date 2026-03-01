@@ -345,7 +345,7 @@
         <div class="welcome-message" id="welcome">
             <div class="icon">🎙</div>
             <h2>Salam!</h2>
-            <p>Mikrofon düyməsinə basıb saxlayın və danışın</p>
+            <p>Mikrofon düyməsinə basın və danışın</p>
         </div>
     </div>
 
@@ -362,7 +362,7 @@
             <div class="pulse-ring"></div>
             <button class="mic-btn" id="micBtn">🎤</button>
         </div>
-        <div class="hint">Basıb saxla → Danış → Burax</div>
+        <div class="hint">Bas → Danış → Susanda avtomatik göndərir</div>
     </div>
 
     <script>
@@ -378,6 +378,16 @@
         let isRecording = false;
         let isProcessing = false;
         let currentAudio = null;
+
+        // Silence detection
+        let audioContext = null;
+        let analyser = null;
+        let silenceTimer = null;
+        let speechDetected = false;
+        let silenceCheckInterval = null;
+        const SILENCE_THRESHOLD = 15;      // Volume threshold (0-255)
+        const SILENCE_DURATION = 1500;      // ms of silence before auto-stop
+        const MIN_SPEECH_DURATION = 500;    // ms minimum speech before allowing silence detection
 
         function setStatus(text, active = false) {
             statusText.textContent = text;
@@ -432,6 +442,63 @@
             if (el) el.remove();
         }
 
+        function startSilenceDetection(stream) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 512;
+            source.connect(analyser);
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            speechDetected = false;
+            let speechStart = null;
+
+            silenceCheckInterval = setInterval(() => {
+                if (!isRecording) return;
+
+                analyser.getByteFrequencyData(dataArray);
+                // Average volume
+                const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+
+                if (avg > SILENCE_THRESHOLD) {
+                    // Sound detected
+                    if (!speechStart) speechStart = Date.now();
+                    if (Date.now() - speechStart > MIN_SPEECH_DURATION) {
+                        speechDetected = true;
+                    }
+                    // Reset silence timer
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+                } else if (speechDetected && !silenceTimer) {
+                    // Silence started after speech
+                    silenceTimer = setTimeout(() => {
+                        if (isRecording) {
+                            stopRecording();
+                        }
+                    }, SILENCE_DURATION);
+                }
+            }, 100);
+        }
+
+        function stopSilenceDetection() {
+            if (silenceCheckInterval) {
+                clearInterval(silenceCheckInterval);
+                silenceCheckInterval = null;
+            }
+            if (silenceTimer) {
+                clearTimeout(silenceTimer);
+                silenceTimer = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            analyser = null;
+            speechDetected = false;
+        }
+
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -448,6 +515,9 @@
                 micContainer.classList.add('recording');
                 waveContainer.classList.add('active');
                 setStatus('Dinləyirəm...', true);
+
+                // Start silence detection
+                startSilenceDetection(stream);
             } catch (err) {
                 setStatus('Mikrofon icazəsi lazımdır');
             }
@@ -460,6 +530,7 @@
             micBtn.classList.remove('recording');
             micContainer.classList.remove('recording');
             waveContainer.classList.remove('active');
+            stopSilenceDetection();
 
             return new Promise(resolve => {
                 mediaRecorder.onstop = async () => {
@@ -506,13 +577,9 @@
                     return;
                 }
 
-                // Show user message
                 addMessage(data.text, 'user');
-
-                // Show AI response
                 addMessage(data.answer, 'ai');
 
-                // Play TTS
                 setStatus('Danışıram...', true);
                 await playTTS(data.answer);
                 setStatus('');
@@ -529,7 +596,6 @@
 
         async function playTTS(text) {
             try {
-                // Stop any currently playing audio
                 if (currentAudio) {
                     currentAudio.pause();
                     currentAudio = null;
@@ -566,20 +632,16 @@
             }
         }
 
-        // Press and hold to record
-        micBtn.addEventListener('pointerdown', e => {
+        // Click to toggle recording
+        micBtn.addEventListener('click', e => {
             e.preventDefault();
             if (isProcessing) return;
-            startRecording();
-        });
 
-        micBtn.addEventListener('pointerup', e => {
-            e.preventDefault();
-            if (isRecording) stopRecording();
-        });
-
-        micBtn.addEventListener('pointerleave', e => {
-            if (isRecording) stopRecording();
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
         });
 
         // Prevent context menu on long press (mobile)
