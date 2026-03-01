@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*.swp
+*.swo
+
+# Virtual environment
+venv/
+ENV/
+env/
+
+# Django
+*.log
+*.pot
+*.pyc
+*.sqlite3
+db.sqlite3
+*.mo
+*.pyc
+*.coverage
+*.pytest_cache/
+
+# Environment variables
+.env
+
+# Media / uploaded files
+media/
+uploads/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
